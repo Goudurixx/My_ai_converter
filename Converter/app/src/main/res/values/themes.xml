@@ -1,0 +1,4 @@
+<resources>
+
+	<style name="Theme.MyAIConverter" parent="Theme.MaterialComponents.Light" />
+</resources>
