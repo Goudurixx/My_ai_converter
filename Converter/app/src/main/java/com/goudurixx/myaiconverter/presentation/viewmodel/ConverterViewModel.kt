@@ -1,16 +1,21 @@
 package com.goudurixx.myaiconverter.presentation.viewmodel
 
 import android.util.Log
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.goudurixx.myaiconverter.domain.model.ConversionResult
+import com.goudurixx.myaiconverter.domain.model.CurrencyInfo
 import com.goudurixx.myaiconverter.domain.usecase.ConvertPriceUseCase
-import com.goudurixx.myaiconverter.presentation.Currency
+import com.goudurixx.myaiconverter.domain.usecase.FilterOnSelectedCurrenciesUseCase
+import com.goudurixx.myaiconverter.domain.usecase.GetCurrenciesUseCase
+import com.goudurixx.myaiconverter.domain.usecase.GetCurrencyEmoji
+import com.goudurixx.myaiconverter.domain.usecase.GetCurrencySymbol
+import com.goudurixx.myaiconverter.domain.usecase.SyncCurrenciesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -18,95 +23,62 @@ import javax.inject.Inject
 @HiltViewModel
 class ConverterViewModel @Inject constructor(
     val convertPriceUseCase: ConvertPriceUseCase,
+    val syncCurrenciesUseCase: SyncCurrenciesUseCase,
+    val getCurrenciesUseCase: GetCurrenciesUseCase,
+    val filterOnSelectedCurrenciesUseCase: FilterOnSelectedCurrenciesUseCase,
+    val getCurrencyEmoji: GetCurrencyEmoji,
+    val getCurrencySymbol: GetCurrencySymbol,
 ) : ViewModel() {
 
-    var _currencies = MutableStateFlow(
-        listOf(
-            Currency(
-                name = "\uD83C\uDDEA\uD83C\uDDFA",
-                currencyCode = "EUR",
-                rate = 1.0,
-            ),
-            Currency(
-                name = "\uD83C\uDDF5\uD83C\uDDF1",
-                currencyCode = "PLN",
-                rate = -1.0,
-            ),
-            Currency(
-                name = "\uD83C\uDDFA\uD83C\uDDE6",
-                currencyCode = "UAH",
-                rate = -1.0,
-            )
-        )
-    )
-    val currencies = _currencies.asStateFlow()
+    val loading: StateFlow<Boolean> = syncCurrenciesUseCase.getSyncingState()
+
+    private val _currencies: MutableStateFlow<List<ConversionResult>> = MutableStateFlow(emptyList())
+    val currencies: StateFlow<List<ConversionResult>> = _currencies.asStateFlow()
+
+    private var input: Double? = null
 
     init {
         viewModelScope.launch {
+            syncCurrenciesUseCase.invoke()
+        }
+    }
+
+    suspend fun onReload() {
+        filterOnSelectedCurrenciesUseCase.invoke().map { currencies ->
+            currencies.map { currency ->
+                ConversionResult(
+                    info = currency,
+                    value = input?.let { currency.rate?.times(it) },
+                    symbol = getCurrencySymbol(currency.code),
+                    emoji = getCurrencyEmoji.invoke(currency.code)
+                )
+            }
+        }.collect { list ->
+            Log.e("_ViewModel", "here $list")
             _currencies.update {
-                it.map { currency ->
-                    if (currency.rate < 0.0) {
-                        var newCurrency = currency
-                        convertPriceUseCase.invoke(currency.currencyCode)
-                            .onSuccess {
-                                newCurrency = currency.copy(
-                                    rate = it
-                                )
-                            }
-                            .onFailure {
-                                Log.e("ViewModel", "failed for ${currency.currencyCode} : ${it.message}")
-                            }
-                        newCurrency
-                    } else
-                        currency
-                }
+                list
             }
         }
     }
 
-    var euroInput by mutableStateOf("")
-        private set
-
-    var plnInput by mutableStateOf("")
-        private set
-
-    var uahInput by mutableStateOf("")
-        private set
-
-    fun updateEuro(input: String) {
-        euroInput = input
-        val euro = input.toDoubleOrNull()
-        if (euro != null) {
-
-            plnInput = "%.2f".format(euro * currencies.value[1].rate)
-            uahInput = "%.2f".format(euro * currencies.value[2].rate)
-        } else {
-            plnInput = ""
-            uahInput = ""
+    fun onUpdate(info: CurrencyInfo, newInp: String) {
+        val double = newInp.toDoubleOrNull()
+        if (double != null) {
+            input = if (double == 0.00) {
+                null
+            } else {
+                info.rate?.let { double / it }
+            }
         }
-    }
 
-    fun updatePln(input: String) {
-        plnInput = input
-        val pln = input.toDoubleOrNull()
-        if (pln != null) {
-            euroInput = "%.2f".format(pln / currencies.value[1].rate)
-            uahInput = "%.2f".format(pln / currencies.value[1].rate * currencies.value[2].rate)
-        } else {
-            euroInput = ""
-            uahInput = ""
-        }
-    }
-
-    fun updateUah(input: String) {
-        uahInput = input
-        val uah = input.toDoubleOrNull()
-        if (uah != null) {
-            euroInput = "%.2f".format(uah / currencies.value[2].rate)
-            plnInput = "%.2f".format(uah / currencies.value[2].rate * currencies.value[1].rate)
-        } else {
-            euroInput = ""
-            plnInput = ""
+        _currencies.update {
+            currencies.value.map {
+                it.copy(
+                    value = it.info.rate?.let {
+                        input?.times(it)
+                    }
+                )
+            }
         }
     }
 }

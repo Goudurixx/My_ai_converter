@@ -1,6 +1,8 @@
 package com.goudurixx.myaiconverter.domain.model
 
 data class ConversionResult(
-    val priceInPln: Double,
-    val priceInUah: Double
+    val info: CurrencyInfo,
+    val value: Double?,
+    val symbol: String? = null,
+    val emoji: String? = null,
 )

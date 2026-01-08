@@ -1,16 +1,20 @@
 package com.goudurixx.myaiconverter.presentation.viewmodel
 
-import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.goudurixx.myaiconverter.domain.model.CurrencyInfo
+import com.goudurixx.myaiconverter.domain.usecase.FilterOnQueryUseCase
 import com.goudurixx.myaiconverter.domain.usecase.GetCurrenciesUseCase
+import com.goudurixx.myaiconverter.domain.usecase.GetCurrencyEmoji
+import com.goudurixx.myaiconverter.domain.usecase.GetCurrencySymbol
+import com.goudurixx.myaiconverter.domain.usecase.HasSelectedCurrenciesUseCase
+import com.goudurixx.myaiconverter.domain.usecase.SelectCurrencyUseCase
+import com.goudurixx.myaiconverter.domain.usecase.SyncCurrenciesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -18,9 +22,16 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    private val searchUseCase: GetCurrenciesUseCase,
+    private val getCurrencyUseCase: GetCurrenciesUseCase,
+    private val getSelectedCurrenciesUseCase: HasSelectedCurrenciesUseCase,
+    private val searchUseCase: FilterOnQueryUseCase,
+    private val syncCurrenciesUseCase: SyncCurrenciesUseCase,
+    private val selectCurrencyUseCase: SelectCurrencyUseCase,
+    private val getCurrencyEmoji: GetCurrencyEmoji,
+    private val getCurrencySymbol: GetCurrencySymbol,
 ) : ViewModel() {
 
+    val loading: StateFlow<Boolean> = syncCurrenciesUseCase.getSyncingState()
     private val _query: MutableStateFlow<String?> = MutableStateFlow(null)
     val query = _query.stateIn(
         scope = viewModelScope,
@@ -28,24 +39,12 @@ class SearchViewModel @Inject constructor(
         initialValue = null
     )
 
-    private val _currencies: MutableStateFlow<List<CurrencyInfo>> = MutableStateFlow(emptyList())
-
     @OptIn(FlowPreview::class)
-    val currencies: StateFlow<List<CurrencyInfo>> = combine(_query, _currencies) { query, currencies ->
-        query?.let {
-            currencies.filter {
-                it.match(query)
-            }
-        } ?: currencies
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(),
-        initialValue = emptyList(),
-    )
+    val currencies: StateFlow<List<CurrencyInfo>> = getCurrencyUseCase.invoke()
 
     init {
         viewModelScope.launch {
-            _currencies.update { getCurrencies(null) }
+            syncCurrenciesUseCase.invoke()
         }
     }
 
@@ -55,18 +54,20 @@ class SearchViewModel @Inject constructor(
             _query.update {
                 query
             }
+            searchUseCase.invoke(_query.value)
         }
     }
 
-    private suspend fun getCurrencies(query: String?): List<CurrencyInfo> {
-        searchUseCase.invoke(query)
-            .onSuccess { result ->
-                Log.e("SearchViewModel", result.toString())
-                return result
-            }.onFailure {
-                Log.e("SearchViewModel", it.message.toString())
-                throw it
-            }
-        throw Throwable("hoy hoy hoy")
+    fun selectCurrency(currencyInfo: CurrencyInfo) {
+        viewModelScope.launch {
+            selectCurrencyUseCase.invoke(
+                currencyInfo.code,
+                currencyInfo.selected.not()
+            )
+        }
     }
+
+    fun getCurrencyEmoji(code: String): String = getCurrencyEmoji.invoke(code)
+    fun getCurrencySymbol(code: String): String = getCurrencySymbol.invoke(code)
+
 }

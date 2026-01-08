@@ -4,34 +4,43 @@ import androidx.compose.foundation.interaction.FocusInteraction
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.intl.Locale
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.toUpperCase
+import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
 import androidx.core.view.HapticFeedbackConstantsCompat
+import com.goudurixx.myaiconverter.domain.model.ConversionResult
+import com.goudurixx.myaiconverter.domain.model.CurrencyInfo
 import com.goudurixx.myaiconverter.ui.theme.MyAIConverterTheme
 
 
 @Composable
 internal fun MyConverterTextField(
-    value: String,
+    value: ConversionResult,
     onValueChange: (String) -> Unit,
     onFocused: (Boolean) -> Unit,
-    prefix: String,
-    label: String,
-    currency: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
@@ -39,30 +48,83 @@ internal fun MyConverterTextField(
     val interactionSource = remember {
         MutableInteractionSource()
     }
+
+    // Use a separate state for the TextField's actual text content
+    // Initialize it with the formatted value from the ViewModel
+    var textState by remember {
+        mutableStateOf(
+            value.value?.let { "%.2f".format(it) } ?: ""
+        )
+    }
+
+    // Update textState when the ViewModel's value changes
+    // This handles cases where the value is updated from elsewhere
+    LaunchedEffect(value.value) {
+        if (value.value != null) {
+            val formattedValue = "%.2f".format(value.value)
+            if (textState != formattedValue) {
+                textState = formattedValue
+            }
+        } else {
+            textState = ""
+        }
+    }
+
     TextField(
-        value = value,
-        onValueChange = onValueChange,
+        value = textState,
+        onValueChange = { newValue ->
+            // --- Sanitization Logic ---
+            val sanitizedValue = newValue.filter { it.isDigit() || it == '.' } // Allow digits and dot
+            val parts = sanitizedValue.split(".")
+            val finalValue = when {
+                parts.size > 2 -> { // More than one dot, take first dot and subsequent digits
+                    parts[0] + "." + parts.drop(1).joinToString("")
+                }
+
+                parts.size == 2 && parts[1].length > 2 -> { // More than two decimal places, truncate
+                    parts[0] + "." + parts[1].take(2)
+                }
+
+                else -> sanitizedValue
+            }
+
+            textState = finalValue // Update local text state immediately
+            onValueChange(finalValue) // Pass the sanitized string to the ViewModel
+        },
         enabled = enabled,
         leadingIcon = {
-            Text(
-                text = prefix,
-                textAlign = TextAlign.Center,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 16.dp)
+            ) {
+                Text(
+                    text = value.emoji ?: String(),
+                    textAlign = TextAlign.Center,
+                )
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    Text(
+                        text = value.info.code.toUpperCase(Locale.current),
+                    )
+                    Text(
+                        text = value.info.rate?.let { "%.2f".format(it) } ?: String(),
+                        maxLines = 1,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
         },
-//        placeholder = {
-//            Text(
-//                text = label,
-//                textAlign = TextAlign.Center,
-//            )
-//        },
         trailingIcon = {
-            Text(
-                text = currency,
-                textAlign = TextAlign.End,
+            SymbolFormatter(
+                symbol = value.symbol ?: String(),
             )
         },
         modifier = modifier.fillMaxWidth(),
-        textStyle = TextStyle(textAlign = TextAlign.Center),
+        textStyle = MaterialTheme.typography.headlineMedium.copy(
+            fontWeight = FontWeight.ExtraBold,
+            textAlign = TextAlign.Center
+        ),
         colors = TextFieldDefaults.colors().copy(
             unfocusedLabelColor = MaterialTheme.colorScheme.onPrimary,
             focusedLabelColor = MaterialTheme.colorScheme.primary,
@@ -77,9 +139,12 @@ internal fun MyConverterTextField(
             unfocusedIndicatorColor = Color.Transparent,
             focusedIndicatorColor = Color.Transparent,
             disabledIndicatorColor = Color.Transparent,
+            focusedLeadingIconColor = MaterialTheme.colorScheme.primary,
+            unfocusedLeadingIconColor = MaterialTheme.colorScheme.onPrimary,
         ),
         shape = RoundedCornerShape(16.dp),
         interactionSource = interactionSource,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
     )
 
     LaunchedEffect(interactionSource) {
@@ -113,26 +178,31 @@ internal fun MyConverterTextField(
 
 
 @Composable
-@Preview
+@PreviewLightDark
 private fun MyConverterTextfieldPreview() {
+    val conversion = ConversionResult(
+        info = CurrencyInfo(
+            code = "USD",
+            name = "US Dollar",
+            rate = 1.0,
+            selected = true,
+        ),
+        value = 0.0,
+        symbol = "$",
+        emoji = "°-°"
+    )
     MyAIConverterTheme() {
-        Column{
+        Column {
             MyConverterTextField(
-                value = "Hey",
+                value = conversion,
                 onValueChange = {},
                 onFocused = { },
-                prefix = "Hey",
-                label = "Hey",
-                currency = "Hey",
                 modifier = Modifier,
             )
             MyConverterTextField(
-                value = "Hey",
+                value = conversion,
                 onValueChange = {},
                 onFocused = { },
-                prefix = "Hey",
-                label = "Hey",
-                currency = "Hey",
                 modifier = Modifier,
                 enabled = false,
             )
